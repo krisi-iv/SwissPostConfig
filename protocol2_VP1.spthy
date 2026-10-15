@@ -1,0 +1,1125 @@
+/*
+honest - SCS, SC, CC1, PC
+dishonest - SCT, EB, CC2, VS, Verif
+change - SCT, EB1, Verif
+
+==============================================================================
+*/
+
+theory Protocol2_VP1
+begin
+
+
+heuristic: O "protocol2_V.oracle"
+
+builtins: signing, hashing, symmetric-encryption, asymmetric-encryption, multiset
+ 
+functions: SchnorrProof/3, VerifySchnorrProof/3, 
+           pow/2, elevID/0, vcsID/0,
+           GenExpProof/4, VerifyExpProof/4, 
+           h1/1, h2/1, h3/1,
+           mul/2
+
+equations: 
+VerifySchnorrProof(pk(EB_sk), SchnorrProof(EB_sk, pk(EB_sk), additional_data), additional_data) = true,
+VerifyExpProof(s1, pow(s1, expo), GenExpProof(s1, expo, pow(s1, expo), additional_data), additional_data) = true
+
+// restriction to have a rule be executed only once
+restriction OnlyOnce: "All #i #j a. OnlyOnce(a) @ i & OnlyOnce(a) @ j ==> #i = #j"
+// Injective map a: B -> C. Allows multiple runs, while forcing agents to stay in their roles
+restriction Injectivity: "All a b1 b2 c #i #j. Injective(a,b1,c) @ i & Injective(a,b2,c) @ j ==> b1 = b2"
+// restriction to check for equality of two inputs
+restriction equality: "All #i x y . Eq( x, y ) @ i ==> x = y"
+
+// setup the SC offline actor - SCS
+rule Setup_SCS [color='#FF6666']:
+    let pkSCS = pk(~ltkSCS) 
+    in
+    [
+        Fr(~ltkSCS),
+        Fr(~setupSk)    
+    ]
+  --[ 
+        Setup_SCS($SCS, pkSCS, ~ltkSCS),
+        OnlyOnce('Setup_SCS'),
+        OnlyOnce(<'Setup_rule', $SCS>), //only one scs can be created
+        Injective('Setup_rule','Setup_SCS', $SCS) // No two different Setup rules map to the same agent
+    ]->
+    [
+        State_SCS_setup($SCS) 
+    ,   !Ltk_SCS( $SCS, ~ltkSCS)
+    ,   Out(pk(~ltkSCS))
+    ,   !EncKey_SCS($SCS, ~setupSk)
+    ]
+
+// setup the SC offline tally actor - SCT
+rule Setup_SCT [color='#6666FF']:
+    let pkSCT = pk(~ltkSCT)
+    in
+    [
+      In(~ltkSCT)
+    ]
+  --[ 
+      Setup_SCT($SCT, pkSCT),
+      OnlyOnce('Setup_SCT'),
+      OnlyOnce(<'Setup_rule', $SCT>),
+      Injective('Setup_rule', 'Setup_SCT', $SCT) // No two different Setup rules map to the same agent
+    ]->
+    [
+      LeakKeys($SCT, ~ltkSCT)
+    , State_SCT_setup($SCT) 
+    , !Ltk_SCT( $SCT, ~ltkSCT)
+    , Out(pk(~ltkSCT))
+    ]
+
+// setup the VS
+rule Setup_VS:
+    let pkVS = pk(~ltkVS)
+    in
+    [
+      Fr(~ltkVS)
+    ]
+  --[ 
+      Setup_VS($VS, pkVS),
+      OnlyOnce('Setup_VS'),
+      OnlyOnce(<'Setup_rule', $VS>),
+      Injective('Setup_rule', 'Setup_VS', $VS) // No two different Setup rules map to the same agent
+    ]->
+    [
+      LeakKeys($VS, ~ltkVS),
+      State_VS_setup($VS) 
+    , !Ltk_VS( $VS, ~ltkVS)
+    , Out(pk(~ltkVS))
+    ]
+
+// setup one of the CCRs
+rule Setup_CC [color='#999999']:
+    let pkCC = pk(~ltkCC)
+    in
+    [
+      Fr(~ltkCC)
+    ]
+  --[ 
+      Setup_CC($CC, pkCC, ~ltkCC),
+      OnlyOnce('Setup_CC'),
+      OnlyOnce(<'Setup_rule', $CC>),
+      Injective('Setup_rule', 'Setup_CC', $CC) // No two different Setup rules map to the same agent
+    ]->
+    [
+      State_CC_setup($CC) 
+    , !Ltk_CC( $CC, ~ltkCC)
+    , Out(pk(~ltkCC))
+    ]
+
+// setup the second CCR - honest
+rule Setup_CC2_honest [color='#555555']:
+    let pkCC2 = pk(~ltkCC2)
+    in
+    [
+      Fr(~ltkCC2)  
+    ]
+  --[
+      Honest($CC2),
+      Setup_CC2($CC2, pkCC2, ~ltkCC2),
+      OnlyOnce('Setup_CC2'),
+      OnlyOnce(<'Setup_rule', $CC2>),
+      Injective('Setup_rule', 'Setup_CC2', $CC2) // No two different Setup rules map to the same agent
+    ]->
+    [
+      LeakKeys($CC2, ~ltkCC2)
+    , State_CC2_setup($CC2) 
+    , !Ltk_CC2( $CC2, ~ltkCC2)
+    , Out(pk(~ltkCC2)) // ltk is known to adversary
+    ]
+
+// setup the second CCR - dishonest
+rule Setup_CC2_dishonest [color='#555555']:
+    let pkCC2 = pk(~ltkCC2)
+    in
+    [
+      In(~ltkCC2)  // CC2's ltk is control by adversary
+    ]
+  --[
+      Dishonest($CC2),
+      Setup_CC2($CC2, pkCC2, ~ltkCC2),
+      OnlyOnce('Setup_CC2'),
+      OnlyOnce(<'Setup_rule', $CC2>),
+      Injective('Setup_rule', 'Setup_CC2', $CC2) // No two different Setup rules map to the same agent
+    ]->
+    [
+      LeakKeys($CC2, ~ltkCC2)
+    , State_CC2_setup($CC2) 
+    , !Ltk_CC2( $CC2, ~ltkCC2)
+//    , Out(pk(~ltkCC2)) // ltk is known to adversary
+    ]
+
+// setup the verifier
+rule Setup_Verif [color='#FFFF66']:
+    let pkVerif = pk(~ltkVerif)
+        Verif = 'Verif'
+    in
+    [
+      In(~ltkVerif)
+    ]
+  --[ 
+      Setup_Verif($Verif, pkVerif),
+      OnlyOnce('Setup_Verif'),
+      OnlyOnce(<'Setup_rule', $Verif>),
+      Injective('Setup_rule', 'Setup_Verif', $Verif) // No two different Setup rules map to the same agent
+    ]->
+    [
+      LeakKeys($Verif, ~ltkVerif)
+    , State_Verif_setup($Verif)
+    , !Ltk_Verif( $Verif, ~ltkVerif)
+    , Out(pk(~ltkVerif))
+    ]
+
+// setup the printing component - PC
+rule Setup_PC [color='#FFFFFF']:
+    [
+      Fr(~ltkPC)
+    ]
+  --[ 
+      Setup_PC($PC, pk(~ltkPC)),
+      OnlyOnce('Setup_PC'),
+      OnlyOnce(<'Setup_rule', $PC>),
+      Injective('Setup_rule', 'Setup_PC', $PC) // No two different Setup rules map to the same agent
+    ]->
+    [
+      State_PC_setup($PC) 
+    , !Ltk_PC( $PC, ~ltkPC)
+    , Out(pk(~ltkPC))
+    ]
+
+rule Keystore: // Make required public keys available through Keystore
+    [ !Ltk_SCS(  $SCS, ~ltkSCS)
+    , !Ltk_CC(   $CC,  ~ltkCC)
+    , !Ltk_CC2(  $CC2, ~ltkCC2)
+    , !Ltk_VS(   $VS,   ltkVS)
+    , !Ltk_Verif($Verif,ltkVerif)
+    , !Ltk_PC(   $PC,   ltkPC)
+    , !Ltk_SCT(  $SCT,  ltkSCT)
+    ]
+    --[ Keystore() ]->
+    [ !Keystore_SCS_CC($SCS,$CC,pk(~ltkCC))
+    , !Keystore_SCS_CC2($SCS,$CC2,pk(~ltkCC2))
+    , !Keystore_VS_SCS($VS,$SCS,pk(~ltkSCS))
+    , !Keystore_Verif_CC($Verif,$CC,pk(~ltkCC))
+    , !Keystore_Verif_CC2($Verif,$CC2,pk(~ltkCC2))
+    , !Keystore_Verif_SCS($Verif,$SCS,pk(~ltkSCS))
+    , !Keystore_PC_SCS($PC,$SCS,pk(~ltkSCS))
+    , !Keystore_CC_SCS($CC,$SCS,pk(~ltkSCS))
+    
+    , !Keystore_CC2_SCS($CC2,$SCS,pk(~ltkSCS))
+    
+    , !Keystore_SCT_SCS($SCT,$SCS,pk(~ltkSCS))
+    ]
+
+// SCS executes algorithm_1 and signs the payloads S1, SX, and PP with its ltk and securely sends them to the online SC
+rule SCS_alg1 [color='#FF6666']:
+    // signs the payloads and the corresponding additional context data
+    let 
+        s1_A = aenc{pow(~pi, ~kid)}pk(setupSk)
+        s1_B = aenc{h1(<pow(~bck, ~kid)>)}pk(setupSk)
+        s1_payload = <s1_A, s1_B>
+        
+        S1_signature = sign(<s1_payload, h(<'verification data', elevID, vcsID>)>, ltkSCS)
+        
+        PP_signature = sign(<~pp_payload, h(<'election event context', elevID>)>, ltkSCS)
+        // prepare the out message that will be sent to the SC
+        out = <'1', <s1_payload, S1_signature>, <~pp_payload, PP_signature>>
+    in
+    [
+      // generate fresh values for s1, sx, and pp that will be signed by the SCS
+      
+        Fr(~pp_payload),
+        
+        Fr(~kid),
+        Fr(~pi),
+        Fr(~bck),
+        Fr(~svk),
+        Fr(~ccid),
+        Fr(~vccid)
+        
+      // access the SCS keystore
+    , !Ltk_SCS( $SCS, ltkSCS)
+    , State_SCS_setup($SCS)
+    , !EncKey_SCS($SCS, setupSk)
+    ]
+    --[
+        SCSGeneratePayloads($SCS, S1_signature, PP_signature, s1_payload, ~pp_payload)
+    ]->
+    [
+      //send the out message securely to the SC (via file transfer in the documentation)
+      Out_1(out)
+      // update the state
+    , State_SCS_alg1($SCS)
+    , !Store('PP',<~pp_payload, PP_signature>)
+    , !Store('S1',<s1_payload, S1_signature>)
+    
+    , !Store('kid', ~kid)
+    , !Store('pi', ~pi)
+    , !Store('kid', ~bck)
+    , !Store('svk',~svk)
+    , !Store('ccid',~ccid)
+    , !Store('vccid',~vccid)
+    
+    ]
+    
+// the SC online receives the message from the SCS and sends the S1 and PP to the VS
+rule SC_forward_payloads [color='#FFB6C1']:
+    let in_msg = <'1', <s1_payload, S1_signature>, <pp_payload, PP_signature>>
+        out_msg = <'2', <s1_payload, S1_signature>, <pp_payload, PP_signature>>
+    in
+    [ 
+        // receive the SCS message
+        Out_1(in_msg)
+    ]
+    --[
+        SCForwardPayloadsToVS($SC) 
+    ]->
+    [
+        // insecurely send the out message to the VS
+        Out(out_msg),
+        // update the state
+        State_SC_first_forward($SC,pp_payload,PP_signature) 
+    ]
+
+// the VS receives the message from the SC, verifies the PP signature and forwards the payload to the CCR
+rule VS_verifies_PP_and_forwards_SCSpayloads [color='#66FF66']:
+    let //PP_signature = sign(<pp_payload, h(<'election event context', elevID>)>, ltkSCS)
+        in_msg = <'2', <s1_payload, S1_signature>, <pp_payload, PP_signature>>
+        out_msg = <'3', 'CC', <s1_payload, S1_signature>, <pp_payload, PP_signature>>
+        out_msg2 = <'3', 'CC2', <s1_payload, S1_signature>, <pp_payload, PP_signature>>
+    in
+    [ 
+        // receive the message from the SC
+        In(in_msg),
+	State_VS_setup($VS),
+	!Ltk_VS($VS,ltkVS),
+	!Keystore_VS_SCS($VS,$SCS,pk(ltkSCS))
+    ]
+    --[
+        Verified('VS','PP',pp_payload),
+        VSVerifiedPP('VS','PP',pp_payload),
+        VSVerifyPP($VS, PP_signature, pp_payload)
+    ]->
+    [
+        // send the out message to CCR
+        Out(out_msg),
+        // send the out message to CCR2
+        Out(out_msg2),
+        // update the state and store the verified pp_payload
+        State_VS_verify_PP_forward_payloads($VS) 
+    ]
+
+// CCR receives the message from the VS, verifies the payload signatures, generates and signs C1 and C2 and sends them back to the VS
+rule CC_verifies_PP_and_S1_alg2 [color='#999999']:
+    // receive the VS message
+    let PP_signature = sign(<pp_payload, h(<'election event context', elevID>)>, ltkSCS)
+        s1_payload = <s1_A, s1_B>
+        S1_signature = sign(<s1_payload, h(<'verification data', elevID, vcsID>)>, ltkSCS)
+        in_msg = <'3', 'CC', <s1_payload, S1_signature>, <pp_payload, PP_signature>>
+        cpk = pk(~csk)
+        pi_cpk = SchnorrProof(~csk, cpk, 'CC cpk')
+        elpk = pk(~elsk)
+        pi_elpk = SchnorrProof(~elsk, elpk, 'CC elpk')
+        statement_A = pow(s1_A, ~expo)
+        statement_B = pow(s1_B, ~expo)
+        expProof_A = GenExpProof(s1_A, ~expo, statement_A, 'CC exp proofA')
+        expProof_B = GenExpProof(s1_B, ~expo, statement_B, 'CC exp proofB')
+        // define the c1 and c2 payloads
+        c1c3_payload = <cpk, pi_cpk, elpk, pi_elpk>
+        c2_payload = <statement_A, expProof_A, statement_B, expProof_B>
+        // sign the c1 and c2 payloads
+        C1C3_signature = sign(<c1c3_payload, h(<'encrypted code shares', '1', elevID, vcsID>)>, ltkCC)
+        C2_signature = sign(<c2_payload, h(<'onlineCC keys', '1', elevID>)>, ltkCC)
+        // the message to be sent to the VS
+        out_msg = <'4', 'CC', <c1c3_payload, C1C3_signature>, <c2_payload, C2_signature>>
+    in
+    [ 
+        // receive the message from the VS
+        In(in_msg),
+        // generate csk
+        Fr(~csk),
+        // generate elsk
+        Fr(~elsk),
+        // generate exponent
+        Fr(~expo),
+	State_CC_setup($CC),
+	!Ltk_CC($CC,ltkCC),
+	!Keystore_CC_SCS($CC,$SCS,pk(ltkSCS))
+    ]
+    --[
+        // verify the PP and S1 signatures - syntactic checks above
+        
+        Verified('CC','PP',pp_payload),
+        CCVerifiedPP($CC, pp_payload),
+        
+        CCVerifyPPandS1AndGenerateC1C2($CC, S1_signature, PP_signature, s1_payload, pp_payload, c1c3_payload, c2_payload, C1C3_signature, C2_signature),
+	CCVerifiedS1($CC,s1_payload)
+    ]->
+    [
+        // send the out message insecurely to the VS
+        Out(out_msg),
+        // update the state and store the verified s1 and pp values + the generated and signed c1 and c2
+        State_CC_verify_SCS_payloads_generateC1C2($CC),
+        !Store('cc1', elpk)
+    ]
+
+// CCR2 receives the message from the VS, verifies the payload signatures, generates and signs C1 and C2 and sends them back to the VS
+rule CC2_verifies_PP_and_S1_alg2 [color='#555555']:
+        // receive the VS message
+    let //PP_signature = sign(<pp_payload, h(<'election event context', elevID>)>, ltkSCS)
+        s1_payload = <s1_A, s1_B>
+        //S1_signature = sign(<s1_payload, h(<'verification data', elevID, vcsID>)>, ltkSCS)
+        in_msg = <'3', 'CC2', <s1_payload, S1_signature>, <pp_payload, PP_signature>>
+        cpk2 = pk(~csk2)
+        pi_cpk2 = SchnorrProof(~csk2, cpk2, 'CC2 cpk')
+        elpk2 = pk(~elsk2)
+        pi_elpk2 = SchnorrProof(~elsk2, elpk2, 'CC2 elpk')
+        statement2_A = pow(s1_A, ~exp2)
+        statement2_B = pow(s1_B, ~exp2)
+        expProof2_A = GenExpProof(s1_A, ~exp2, statement2_A, 'CC2 exp proofA')
+        expProof2_B = GenExpProof(s1_B, ~exp2, statement2_B, 'CC2 exp proofB')
+        // define the c1_2 and c2_2 payloads
+        c1_2_payload = <cpk2, pi_cpk2, elpk2, pi_elpk2>
+        c2_2_payload = <statement2_A, expProof2_A, statement2_B, expProof2_B>
+        // sign the c1 and c2 payloads
+        C1_2_signature = sign(<c1_2_payload, h(<'encrypted code shares', '2', elevID, vcsID>)>, ltkCC2)
+        C2_2_signature = sign(<c2_2_payload, h(<'onlineCC keys', '2', elevID>)>, ltkCC2)
+        // the message to be sent to the VS
+        out_msg = <'4', 'CC2', <c1_2_payload, C1_2_signature>, <c2_2_payload, C2_2_signature>>
+    in
+    [ 
+        // receive the message from the VS
+        In(in_msg),
+        // read in from the adversary: csk2
+        In(~csk2),
+        // read in from the adversary: elsk2
+        In(~elsk2),
+        // read in from the adversary: exponent2
+        In(~exp2),
+	State_CC2_setup($CC2),
+	!Ltk_CC2($CC2,ltkCC2),
+    !Keystore_CC2_SCS($CC2,$SCS,pk(ltkSCS))
+    ]
+    --[
+       
+        Verified('CC2','PP',pp_payload),
+        CC2VerifiedPP($CC2, pp_payload),
+        
+        CC2VerifyPPandS1AndGenerateC1C2($CC2, S1_signature, PP_signature, s1_payload, pp_payload, c1_2_payload, c2_2_payload, C1_2_signature, C2_2_signature),
+        CC2VerifiedS1($CC2,s1_payload)
+    ]->
+    [
+        // send the out message insecurely to the VS
+        Out(out_msg),
+        // update the state and store the verified s1 and pp values + the generated and signed c1 and c2
+        State_CC2_verify_SCS_payloads_generateC1C2($CC2),
+        !Store('cc2ELPK', elpk2)
+    ]
+
+// the VS receives and forwards the message from the CCR to the SC
+rule VS_forwards_CCpayloads [color='#66FF66']:
+    let in_msg = <'4', 'CC', <c1c3_payload, C1C3_signature>, <c2_payload, C2_signature>>
+        in_msg2 = <'4', 'CC2', <c1_2_payload, C1_2_signature>, <c2_2_payload, C2_2_signature>>
+        list_CC_payloads_signatures = <<c1c3_payload, C1C3_signature>, <c2_payload, C2_signature>, <c1_2_payload, C1_2_signature>, <c2_2_payload, C2_2_signature>>
+        out_msg = <'5', list_CC_payloads_signatures>
+    in
+    [ 
+        In(in_msg),
+        In(in_msg2),
+        State_VS_verify_PP_forward_payloads($VS) 
+    ]
+    --[
+        VSForwardsCCPayloads($VS, $SC)
+    ]->
+    [
+        Out(out_msg),
+        State_VS_forward_CCpayloads($VS) 
+    ]
+
+// the SC receives and forwards the message from the VS to the SCS
+rule SC_forwards_CCpayloads [color='#FFB6C1']:
+    let list_CC_payloads_signatures = <<c1c3_payload, C1C3_signature>, <c2_payload, C2_signature>, <c1_2_payload, C1_2_signature>, <c2_2_payload, C2_2_signature>>
+        in_msg = <'5', list_CC_payloads_signatures>
+        out_msg = <'6', list_CC_payloads_signatures>
+    in
+    [ 
+        In(in_msg),
+        State_SC_first_forward($SC,pp_payload,PP_signature) 
+    ]
+    --[
+        SCForwardsCCPayloads($SC, $SCS)
+    ]->
+    [
+        // securely send the message to the SCS
+        Out_6(out_msg),
+        State_SC_forward_CCpayloads($SC,pp_payload,PP_signature) 
+    ]
+
+// SC offline performs algorithm 3 and verifies the CCR and CCR2 signatures and generates and signs the S4, L, and S2 payloads
+rule SCS_verify_CCpayloads [color='#FF6666']:
+    let // perform syntactic check on Schnorr Proof
+        cpk = pk(csk)
+        pi_cpk = SchnorrProof(csk, cpk, 'CC cpk')
+        elpk = pk(elsk)
+        pi_elpk = SchnorrProof(elsk, elpk, 'CC elpk')
+        cpk2 = pk(csk2)
+        pi_cpk2 = SchnorrProof(csk2, cpk2, 'CC2 cpk')
+        elpk2 = pk(elsk2)
+        pi_elpk2 = SchnorrProof(elsk2, elpk2, 'CC2 elpk')
+        s1_A = aenc{pow(pi, kid)}pk(setupSk) // syntactic check of s1_A
+        s1_B = aenc{h1(<pow(bck, kid)>)}pk(setupSk) // syntactic check of s1_B
+        statement_A = pow(s1_A, expo)           // syntactic check of statement_A (to be used to make pow(aenc{pow(pi, kid)}pk(setupSk), expo) -> pow(pow(pi, kid), expo))
+        statement_B = pow(s1_B, expo)           // syntactic check of statement_B (to be used to make pow(aenc{h1(<pow(bck, kid)>)}pk(setupSk), expo) -> pow(h1(<pow(bck, kid)>), expo))
+        expProof_A = GenExpProof(s1_A, expo, statement_A, 'CC exp proofA')
+        expProof_B = GenExpProof(s1_B, expo, statement_B, 'CC exp proofB')
+        statement2_A = pow(s1_A, exp2)            // syntactic check of statement2_A (to be used to make pow(aenc{pow(pi, kid)}pk(setupSk), exp2) -> pow(pow(pi, kid), exp2))
+        statement2_B = pow(s1_B, exp2)           // syntactic check of statement2_B (to be used to make pow(aenc{h1(<pow(bck, kid)>)}pk(setupSk), exp2) -> pow(h1(<pow(bck, kid)>), exp2))
+        expProof2_A = GenExpProof(s1_A, exp2, statement2_A, 'CC2 exp proofA')
+        expProof2_B = GenExpProof(s1_B, exp2, statement2_B, 'CC2 exp proofB')
+        c1c3_payload = <cpk, pi_cpk, elpk, pi_elpk>
+        c2_payload = <statement_A, expProof_A, statement_B, expProof_B>
+        c1_2_payload = <cpk2, pi_cpk2, elpk2, pi_elpk2>
+        c2_2_payload = <statement2_A, expProof2_A, statement2_B, expProof2_B>  
+        decr_statement_A = pow(pow(pi, kid), expo)
+        decr_statement_B = pow(h1(<pow(bck, kid)>), expo)
+        decr_statement2_A = pow(pow(pi, kid), exp2)
+        decr_statement2_B = pow(h1(<pow(bck, kid)>), exp2)
+	// perform syntactic check on C1C3 signature
+	C1C3_signature = sign(<c1c3_payload, h(<'encrypted code shares', '1', elevID, vcsID>)>, ltkCC)
+	// syntactic check on C2_signature
+        C2_signature = sign(<c2_payload, h(<'onlineCC keys', '1', elevID>)>, ltkCC)
+        C1_2_signature = sign(<c1_2_payload, h(<'encrypted code shares', '2', elevID, vcsID>)>, ltkCC2)
+        C2_2_signature = sign(<c2_2_payload, h(<'onlineCC keys', '2', elevID>)>, ltkCC2)
+        
+        list_CC_payloads_signatures = <<c1c3_payload, C1C3_signature>, <c2_payload, C2_signature>, <c1_2_payload, C1_2_signature>, <c2_2_payload, C2_2_signature>>
+        in_msg = <'6', list_CC_payloads_signatures>
+    in
+    [ 
+        // securely receive the CCR and CCR2 payloads
+        Out_6(in_msg)
+        // retrieve the latest state for the SCS
+	, !Keystore_SCS_CC($SCS,$CC,pk(ltkCC))
+	, !Keystore_SCS_CC2($SCS,$CC2,pk(ltkCC2))
+        , State_SCS_alg1($SCS)
+        , !Store('S1',<s1_payload, S1_signature>)
+        , !Store('PP',<pp_payload, PP_signature>)
+        , !EncKey_SCS($SCS, setupSk)
+    ]
+    --[
+
+        Verified('SCS','C1C3',c1c3_payload),
+        SCSVerifiedC1('SCS','C1C3',c1c3_payload),
+
+        Verified('SCS','C2',c2_payload),
+        SCSVerifiedC2('SCS','C2',c2_payload),
+        
+        Verified('SCS','C1C3_2',c1_2_payload),
+        SCSVerifiedC1_2('SCS','C1C3_2',c1_2_payload),
+        
+        Verified('SCS','C2_2',c2_2_payload),
+        SCSVerifiedC2_2('SCS','C2_2',c2_2_payload),
+        SCSVerifyCCPayloads($SCS, c1c3_payload, c2_payload, C1C3_signature, C2_signature, c1_2_payload, c2_2_payload, C1_2_signature, C2_2_signature),
+        DecryptedStatementA(statement_A, decr_statement_A),
+        DecryptedStatementB(statement_B, decr_statement_B),
+        DecryptedStatement2A(statement2_A, decr_statement2_A),
+        DecryptedStatement2B(statement2_B, decr_statement2_B)
+    ]->
+    [
+        State_SCS_verif_CC($SCS)
+     , !Store('c123', <c1c3_payload, C1C3_signature, c2_payload, C2_signature, c1_2_payload, C1_2_signature, c2_2_payload, C2_2_signature>)
+     , !Store_decrypted_CC_2_payloads('dec c2', decr_statement_A, decr_statement_B, decr_statement2_A, decr_statement2_B)
+    ]
+
+// SC offline performs algorithm 3 and verifies the CCR and CCR2 signatures and generates and signs the S4, L, and S2 payloads
+rule SCS_alg3 [color='#FF6666']:
+    let SX_signature = sign(<~sx_payload, h(<'tally data', elevID, vcsID>)>, ltkSCS)
+ 
+        s2_payload = <h1(<svk, pp_payload>), h2(<svk, pp_payload>)>
+        s3_payload = h1(<decr_statement_B, decr_statement2_B>)
+        
+        key = h2(<decr_statement_A ++ decr_statement2_A>)
+        s4_A = senc(ccid, key)
+        s4_B = senc(vccid, key)
+        s4_payload = <s4_A, s4_B>
+        
+        S4_signature = sign(<s4_payload, h(<'cm table', elevID, vcsID>)>, ltkSCS)
+        S3_signature = sign(<s3_payload, h(<'lvcc allow list', elevID, vcsID>)>, ltkSCS)
+        S2_signature = sign(<s2_payload, h(<'voter authentication', elevID, vcsID>)>, ltkSCS)
+        out_msg = <'7', <s4_payload, S4_signature>, <s3_payload, S3_signature>, <s2_payload, S2_signature>, <~sx_payload, SX_signature>>
+    in
+    [
+        // generate the new payload sx
+        Fr(~sx_payload),
+        // access the SCS keystore
+        !Ltk_SCS( $SCS, ltkSCS),
+        // retrieve the latest state for the SCS
+        State_SCS_verif_CC($SCS) ,
+        !Store('svk',svk),
+        !Store('ccid',ccid),
+        !Store('vccid',vccid),
+        !Store('PP',<pp_payload, PP_signature>)
+        , !Store('c123', <c1c3_payload, C1C3_signature, c2_payload, C2_signature, c1_2_payload, C1_2_signature, c2_2_payload, C2_2_signature>)
+        , !Store_decrypted_CC_2_payloads('dec c2', decr_statement_A, decr_statement_B, decr_statement2_A, decr_statement2_B)
+    ]
+    --[
+        SCSAlg3($SCS, s4_payload, s3_payload, s2_payload, ~sx_payload, S4_signature, S3_signature, S2_signature, SX_signature)
+    ]->
+    [
+        // securely send the new payloads to the SC online
+        Out_7(out_msg)
+        , State_SCS_alg3($SCS)
+	, !Store('SX',<~sx_payload, SX_signature>)
+        , !Store('S2',<s2_payload, S2_signature>)
+        , !Store('S3',<s3_payload, S3_signature>)
+        , !Store('S4',<s4_payload, S4_signature>)
+    ]
+
+// the SC forwards the payloads generated by the SCS to the VS
+rule SC_forward_Alg3_payloads [color='#FFB6C1']:
+    let in_msg = <'7', <s4_payload, S4_signature>, <s3_payload, S3_signature>, <s2_payload, S2_signature>, <sx_payload, SX_signature>>
+        out_msg = <'8', <s4_payload, S4_signature>, <s3_payload, S3_signature>, <s2_payload, S2_signature>>
+    in
+    [ 
+        Out_7(in_msg),
+        State_SC_forward_CCpayloads($SC,pp_payload,PP_signature)
+    ]
+    --[        
+        SCForwardAlg3PayloadsToVS($SC)
+    ]->
+    [
+        Out(out_msg),
+        State_SC_forward_Alg3_payloads($SC,pp_payload,PP_signature,sx_payload,SX_signature) 
+    ]
+
+// the VS verifies the S4 and S2 signatures and forwards the L payload to the CCR
+rule VS_verifies_S4_S2_and_forwards_SCSpayloads [color='#66FF66']: //TODO: remove S2/S4 let binding check - malicious VS
+    let S4_signature = sign(<s4_payload, h(<'cm table', elevID, vcsID>)>, ltkSCS)
+        S2_signature = sign(<s2_payload, h(<'voter authentication', elevID, vcsID>)>, ltkSCS)
+        in_msg = <'8', <s4_payload, S4_signature>, <s3_payload, S3_signature>, <s2_payload, S2_signature>>
+        out_msg = <'9', 'CC',  <s3_payload, S3_signature>>
+        out_msg2 = <'9', 'CC2',  <s3_payload, S3_signature>>
+    in
+    [ 
+      In(in_msg)
+    , State_VS_forward_CCpayloads($VS) 
+    , !Keystore_VS_SCS($VS, $SCS, pk(ltkSCS))
+    ]
+    --[
+        VSVerifyS4andS2($VS, s4_payload, s2_payload, S4_signature, S2_signature)
+    ]->
+    [
+        Out(out_msg),
+        Out(out_msg2),
+        State_VS_verify_S4_S2_forward_payloads($VS) 
+    ]
+
+// the CCR receives the S3 payload from the VS and verifies its signature
+rule CC_verifies_S3 [color='#999999']:
+    let S3_signature = sign(<s3_payload, h(<'lvcc allow list', elevID, vcsID>)>, ltkSCS)
+        in_msg = <'9', 'CC', <s3_payload, S3_signature>>
+    in
+    [ 
+        In(in_msg),
+	!Keystore_CC_SCS($CC,$SCS,pk(ltkSCS)),
+        State_CC_verify_SCS_payloads_generateC1C2($CC) 
+    ]
+    --[
+        
+        CCVerifiedS3($CC, s3_payload),
+        CCVerifiesS3($CC, s3_payload)
+    ]->
+    [
+        State_CC_verify_L($CC) 
+    ]
+
+// the CCR2 receives the S3 payload from the VS and verifies its signature
+rule CC2_verifies_S3 [color='#555555']:
+    let //S3_signature = sign(<s3_payload, h(<'lvcc allow list', elevID, vcsID>)>, ltkSCS)
+        in_msg = <'9', 'CC2', s3_payload, S3_signature>
+    in
+    [ 
+        In(in_msg),
+        !Keystore_CC2_SCS($CC2,$SCS,pk(ltkSCS)),
+        State_CC2_verify_SCS_payloads_generateC1C2($CC2)
+    ]
+    --[        
+        CCVerifiedS3($CC2, s3_payload),
+        CC2VerifiesS3($CC2, s3_payload)
+    ]->
+    [
+        State_CC2_verify_L($CC2) 
+    ]
+
+// the SCS executes algorithm 4 and generates the S5 payload and its signature and sends it securely to the SC
+rule SCS_alg4 [color='#FF6666']:
+        // sign the generated s5 value and the corresponding context data
+    let 
+        c1c3_payload = <cpk, pi_cpk, elpk, pi_elpk>
+        c1_2_payload = <cpk2, pi_cpk2, elpk2, pi_elpk2>
+        ctxt = <elpk, elpk2, cpk, cpk2, pp_payload>
+        s5_payload = senc(<kid, ctxt>, h3(svk))
+        
+        S5_signature = sign(<s5_payload, h(<'vc keystore', elevID, vcsID>)>, ltkSCS)
+        out_msg_sc = <'11a', <s5_payload, S5_signature>>
+    in
+    [ 
+        
+        // access the SCS keystore
+        !Ltk_SCS( $SCS, ltkSCS),
+        State_SCS_alg3($SCS),
+        !Store('c123', <c1c3_payload, C1C3_signature, c2_payload, C2_signature, c1_2_payload, C1_2_signature, c2_2_payload, C2_2_signature>),
+        !Store('PP',<pp_payload, PP_signature>),
+        !Store('svk',svk),
+        !Store('kid', kid)
+    ]
+    --[
+        SCSAlg4($SCS, s5_payload, S5_signature)
+    ]->
+    [
+        Out_11a(out_msg_sc),
+        State_SCS_alg4($SCS) 
+      , !Store('S5',<s5_payload, S5_signature>)
+    ]
+
+// NOTE: pswrd & pswrd2 is entered by the adversary
+
+// the SCS receives the EB passwords, performs algorithm 6 and signs the hashed EB passwords (S7) and S6 payloads
+rule SCS_alg6 [color='#FF6666']:
+        // receive the EB passwords
+    let in_msg = pswrds
+        in_msg2 = pswrds2
+        hashedPasswords = <h(pswrds), h(pswrds2)>
+        // compute the EB_sk
+        EB_sk = h(<'ElectoralBoardSecretKey', pswrds, pswrds2>)
+        EB_pk = pk(EB_sk)
+        EB_proof = SchnorrProof(EB_sk, EB_pk, 'SetupTallyEB')
+        // sign the hashed EB passwords and the s6 payload
+        
+        c1c3_payload = <cpk, pi_cpk, elpk, pi_elpk>
+        c1_2_payload = <cpk2, pi_cpk2, elpk2, pi_elpk2>
+        s6_payload = <EB_pk, EB_proof, elpk, elpk2>
+        
+        S7_signature = sign(<hashedPasswords, h(<'electoral board hashes', elevID>)>, ltkSCS)
+        S6_signature = sign(<s6_payload, h(<'public keys', 'setup', elevID>)>, ltkSCS)
+        out_msg_sc = <'11b', <s6_payload, S6_signature>, <hashedPasswords, S7_signature>>
+    in
+    [ 
+        In(in_msg),
+        In(in_msg2),
+        
+        // access the SCS keystore
+        !Ltk_SCS( $SCS, ltkSCS),	
+        State_SCS_alg4($SCS) ,
+        !Store('c123', <c1c3_payload, C1C3_signature, c2_payload, C2_signature, c1_2_payload, C1_2_signature, c2_2_payload, C2_2_signature>)
+    ]
+    --[
+        EB2Passwords(pswrds2),
+        SCSAlg6($SCS, s6_payload, S6_signature, hashedPasswords, S7_signature)
+    ]->
+    [
+        // send the out message securely to the SC online
+        Out_11b(out_msg_sc), 
+        State_SCS_alg6($SCS) 
+	, !Store('S6', <s6_payload, S6_signature>)
+    ]
+
+// the SC receives the SCS messages from algorithms 4 and 6 and forwards them securely to the SCT (file transfer)
+rule SC_forward_Alg4_Alg6_payloads_to_SCT [color='#FFB6C1']:
+    let in_msg_14a = <'11a', <s5_payload, S5_signature>>
+        in_msg_16 = <'11b', <s6_payload, S6_signature>, <hashedPasswords, S7_signature>>
+        out_msg = <'18', <pp_payload, PP_signature>, <hashedPasswords, S7_signature>, <s6_payload, S6_signature>, <sx_payload, SX_signature>>
+    in
+    [ 
+        Out_11a(in_msg_14a),
+        Out_11b(in_msg_16),
+	
+        State_SC_forward_Alg3_payloads($SC,pp_payload,PP_signature,sx_payload,SX_signature) 
+    ]
+    --[
+        SCForwardAlg4Alg6PayloadsToSCT($SC, $SCT)
+    ]->
+    [
+        Out(out_msg),
+        State_SC_forward_Alg4_alg6_payloads($SC, s6_payload, S6_signature, s5_payload, S5_signature) 
+    ]
+
+// the SCS sends the signed payloads to the verifier securely (file transfer)
+rule SCS_verif [color='#FF6666']:
+    let out_msg_verif = <'14', <pp_payload, PP_signature>, <sx_payload, SX_signature>, <c1c3_payload, C1C3_signature>, <c2_payload, C2_signature>, <c1_2_payload, C1_2_signature>, <c2_2_payload, C2_2_signature>, <s6_payload, S6_signature>>
+    in
+    [
+      State_SCS_alg6($SCS) 
+    , !Store('PP', <pp_payload, PP_signature>)
+    , !Store('c123', <c1c3_payload, C1C3_signature, c2_payload, C2_signature, c1_2_payload, C1_2_signature, c2_2_payload, C2_2_signature>)
+    , !Store('SX', <sx_payload, SX_signature>)
+    , !Store('S6', <s6_payload, S6_signature>)
+    ]
+    --[
+        SCStoVerifier($SCS, $Verif)
+    ]->
+    [
+      Out(out_msg_verif)
+    , State_SCS_verif($SCS) 
+    , SCS_Store(<pp_payload, PP_signature, c1c3_payload, C1C3_signature, c2_payload, C2_signature, c1_2_payload, C1_2_signature, c2_2_payload, C2_2_signature, sx_payload, SX_signature, s6_payload, S6_signature>) 
+    ]
+
+// the verifier receives the payloads from the SCS and verifies the signatures on them and outputs a result of the verifiaction
+rule Verifier_rcv_data [color='#FFFF66']:
+    let // perform syntactic check on signatures
+    pkSCS = pk(ltkSCS)
+    pkCC = pk(ltkCC)
+    pkCC2 = pk(ltkCC2)
+    // PP_signature = sign(<pp_payload, h(<'election event context', elevID>)>, ltkSCS)
+    EB_sk = h(<'ElectoralBoardSecretKey', pswrds, pswrds2>)
+    EB_pk = pk(EB_sk)
+    EB_proof = SchnorrProof(EB_sk, EB_pk, 'SetupTallyEB')
+    
+        c1c3_payload = <cpk, pi_cpk, elpk, pi_elpk>
+        c1_2_payload = <cpk2, pi_cpk2, elpk2, pi_elpk2>
+        s6_payload = <EB_pk, EB_proof, elpk, elpk2>
+    
+    in_msg = <'14', <pp_payload, PP_signature>, <sx_payload, SX_signature>, <c1c3_payload, C1C3_signature>, <c2_payload, C2_signature>, <c1_2_payload, C1_2_signature>, <c2_2_payload, C2_2_signature>, <s6_payload, S6_signature>>
+    in
+    [ 
+        In(in_msg),
+	!Ltk_Verif($Verif,ltkVerif),
+	!Keystore_Verif_CC($Verif,$CC,pkCC),
+	!Keystore_Verif_CC2($Verif,$CC2,pkCC2),
+	!Keystore_Verif_SCS($Verif,$SCS,pkSCS),
+	State_Verif_setup($Verif)
+    ]
+    --[ 
+        
+        VerifierVerifyData($Verif, SX_signature, PP_signature, sx_payload, pp_payload, c1c3_payload, c2_payload, c1_2_payload, c2_2_payload, C1C3_signature, C2_signature, C1_2_signature, C2_2_signature, s6_payload, S6_signature, EB_pk, EB_proof),
+	VerifierVerified($Verif)
+    ]->
+    // verifications have passed so the result sent back is 'true'
+    [ Out(true) ]
+
+// the SCS receives the verifier's result and if it's 'true', it send the printing XML (Vcard) to the PC
+rule SCS_printing_xml [color='#FF6666']:
+    // sign the vcard payload
+    let vcard_payload = <s1_payload, s2_payload, s3_payload, s4_payload, s5_payload, s6_payload, sx_payload, c1c3_payload, c2_payload, c1_2_payload, c2_2_payload>
+        Vcard_signature = sign(<vcard_payload, h('evoting print')>, ltkSCS)
+        out_msg_pc = <'16', <vcard_payload, Vcard_signature>>
+    in
+    [   
+        // receive the verification result
+        In(result),
+        State_SCS_verif($SCS) 
+      , !Ltk_SCS( $SCS,ltkSCS)
+      , SCS_Store(<pp_payload, PP_signature, c1c3_payload, C1C3_signature, c2_payload, C2_signature, c1_2_payload, C1_2_signature, c2_2_payload, C2_2_signature, sx_payload, SX_signature, s6_payload, S6_signature>)
+      , !Store('S1',<s1_payload,s1_unused>)
+      , !Store('S2',<s2_payload,s2_unused>)
+      , !Store('S3',<s3_payload,s3_unused>)
+      , !Store('S4',<s4_payload,s4_unused>)
+      , !Store('S5',<s5_payload,s5_unused>)
+    ]
+    --[
+        // check the verification result
+        Eq(result, true),
+        SCSPrinting($SCS, vcard_payload, Vcard_signature)
+    ]->
+    [
+        // send Vcard to the PC securely
+        Out_16(out_msg_pc)
+    ]
+
+// receive the printing XML and verify the SCS signature
+rule PC_rcv_Vcard [color='#FFFFFF']:
+    let pkSCS=pk(ltkSCS)
+    vcard_payload = <s1_payload, s2_payload, s3_payload, s4_payload, s5_payload, s6_payload, sx_payload, c1c3_payload, c2_payload, c1_2_payload, c2_2_payload>
+    Vcard_signature = sign(<vcard_payload, h('evoting print')>, ltkSCS)
+    in_msg = <'16', <vcard_payload, Vcard_signature>>
+    in
+    [ 
+        Out_16(in_msg),
+	State_PC_setup($PC),
+	!Ltk_PC($PC,ltkPC),
+	!Keystore_PC_SCS($PC,$SCS,pkSCS)
+    ]
+    --[
+        
+        PCVerifyVcard($PC, vcard_payload, Vcard_signature),
+        PCVcard($PC, s1_payload, s2_payload, s3_payload, s4_payload, s5_payload, s6_payload, sx_payload, c1c3_payload, c2_payload, c1_2_payload, c2_2_payload)
+    ]->
+    [ ]
+
+// the SC forwards the S6 and S5 values to the VS
+rule SC_forward_s6_s5 [color='#FFB6C1']:
+    let out_msg = <'12', <s6_payload, S6_signature>, <s5_payload, S5_signature>>
+    in
+    [   
+        State_SC_forward_Alg4_alg6_payloads($SC, s6_payload, S6_signature, s5_payload, S5_signature) 
+    ]
+    --[
+        SCForwardAlg4Alg6PayloadsToVS($SC, $VS)
+    ]->
+    [ Out(out_msg) ]
+
+// the VS receives the message from the SC, verifies the payloads' signatures, stores the values, and forwards S6 to the CCR
+rule VS_verifies_S6_S5_and_forwards_SCSpayloads [color='#66FF66']:
+    let pkSCS = pk(ltkSCS)
+        // S6_signature = sign(<s6_payload, h(<'public keys', 'setup', elevID>)>, ltkSCS)
+        in_msg = <'12', <s6_payload, S6_signature>, <s5_payload, S5_signature>>
+        out_msg = <'13', 'CC', <s6_payload, S6_signature>>
+        out_msg2 = <'13', 'CC2', <s6_payload, S6_signature>>
+    in
+    [ 
+        In(in_msg),
+        State_VS_verify_S4_S2_forward_payloads($VS)
+	, !Keystore_VS_SCS($VS,$SCS,pkSCS)
+    ]
+    --[ 
+
+        
+        VSVerifyS6AndS5($VS, s6_payload, s5_payload, S6_signature, S5_signature)
+    ]->
+    [
+        Out(out_msg),
+        Out(out_msg2),
+    ]
+
+// CCR receives the message from the VS and verifies the S6 signture and stores the value
+rule CC_rcv_S6 [color='#999999']:
+    let
+      s6_payload = <EB_pk, EB_proof, elpk, elpk2>
+      S6_signature = sign(<s6_payload, h(<'public keys', 'setup', elevID>)>, ltkSCS)
+      in_msg = <'13', 'CC', <s6_payload, S6_signature>>
+    in
+    [ 
+        In(in_msg),
+	!Keystore_CC_SCS($CC,$SCS,pk(ltkSCS)),
+        State_CC_verify_L($CC),
+        !Store('cc1', elpk),
+        !Store('cc2ELPK', elpk2)
+    ]
+    --[ 
+        
+        
+        Verified('CC','S6',s6_payload),
+        CCVerifiedS6('CC','S6',s6_payload),
+        CCrcvS6($CC, s6_payload, S6_signature, EB_pk, EB_proof)
+    ]->
+    [ Out_19_1(true) ]
+
+// CCR2 receives the message from the VS and verifies the S6 signture and stores the value
+rule CC2_rcv_S6 [color='#555555']:
+    let 
+        s6_payload = <EB_pk, EB_proof, elpk, elpk2>
+        // S6_signature = sign(<s6_payload, h(<'public keys', 'setup', elevID>)>, ltkSCS)
+        in_msg = <'13', 'CC2', <s6_payload, S6_signature>>
+    in
+    [ 
+        In(in_msg),
+        State_CC2_verify_L($CC2),
+        !Keystore_CC2_SCS($CC2,$SCS,pk(ltkSCS)),
+        !Store('cc1', elpk),
+        !Store('cc2ELPK', elpk2)
+    ]
+    --[
+	    CC2rcvS6($CC2, s6_payload, S6_signature, EB_pk, EB_proof)
+    ]->
+    [ Out_19_2(true) ]
+
+// the SCT receives the SCS payloads from the SC and verifies them
+rule SCT_verify_SCS_data [color='#6666FF']:
+    let
+        hashedPasswords = <hash1, hash2>
+        hashPsw1Recompute = h(pswrds)
+        hashPsw2Recompute = h(pswrds2)
+        recomputedEB_sk = h(<'ElectoralBoardSecretKey', pswrds, pswrds2>)
+        recomputedEB_pk = pk(recomputedEB_sk)
+        // S7_signature = sign(<hashedPasswords, h(<'electoral board hashes', elevID>)>, ltkSCS)
+        in_msg = <'18', <pp_payload, PP_signature>, <hashedPasswords, S7_signature>, <s6_payload, S6_signature>, <sx_payload, SX_signature>>
+    in
+    [
+        Out_19_1(res),
+        Out_19_2(res1),
+        // have the EB members enter their passwords
+        In(pswrds),
+        In(pswrds2),
+        // receive message from the SC
+        In(in_msg),
+	!Ltk_SCT($SCT,ltkSCT),
+	!Keystore_SCT_SCS($SCT,$SCS,pk(ltkSCS)),
+        State_SCT_setup($SCT)
+    ]
+    --[ 
+        SCTVerifyData($SCT, pp_payload, PP_signature, hashedPasswords, S7_signature, s6_payload, S6_signature, sx_payload, SX_signature, pswrds, pswrds2),
+        SCTVerified($SCT)
+    ]->
+    [ Out(true) ]
+
+
+rule SCS_verifies_SCT_result [color='#FF6666']:
+    [ In(result) ]
+    --[
+        Eq(result, true),
+        SCSVerifySCTRes($SCS, result)
+    ]->
+    []
+
+lemma executability:
+exists-trace
+"Ex sct CC2 #i #j. SCTVerified(sct)@i & Honest(CC2)@j & All #i #j. Keystore()@i & Keystore()@j ==> #i = #j"
+
+lemma attacker_changes_EB2_password_but_fails_check:
+" All eb psw psw2 sct psw4 pp_payload PP hashedPasswords S7 s6_payload S6 sx_payload SX
+    #t01 #t02 #t04.
+    EBPasswords(eb, psw) @ t01
+    & EB2Passwords(psw2) @ t02
+    & SCTVerifyData(sct, pp_payload, PP, hashedPasswords, S7, s6_payload, S6, sx_payload, SX, psw, psw4) @ t04
+    & #t01 < #t04
+    & #t02 < #t04
+    ==> (psw2 = psw4)
+"
+
+
+lemma S1_correctness_CC:
+// if for all traces the honest CCRs verify the S1 payload
+" All cc x #j. CCVerifiedS1(cc, x) @j
+        ==>
+        // then the SCS must have generated and signed the same S1 before that
+        ( 
+            Ex scs S1p PPp ppp #i.
+            SCSGeneratePayloads(scs, S1p, PPp, x, ppp) @ i
+            & #i < #j
+        )
+"
+
+lemma S1_correctness_CC_Verif:
+// if for all traces the honest CCRs and verifiers verify the S1 payload
+" All cc x verif #j #k.
+    CCVerifiedS1(cc, x) @j & VerifierVerified(verif)@k & #j < #k
+        ==>
+        // then the SCS must have generated and signed the same S1 before that
+        (
+            Ex scs S1p PPp ppp #i.
+            SCSGeneratePayloads(scs, S1p, PPp, x, ppp) @ i
+            & #i < #j
+        )
+"
+
+lemma S1_correctness_Verif:
+// if for all traces the honest verifiers verify the payloads successfully
+" All verif #k.
+  VerifierVerified(verif)@k
+        ==>
+        (
+            (   // then the SCS must have generated and signed the same S1 before that
+                Ex scs x S1p PPp ppp #i.
+                SCSGeneratePayloads(scs, S1p, PPp, x, ppp) @ i
+                & #i < #k
+                // and in all those traces the honest CCRs verify the same S1
+		        & (All cc y #l. CCVerifiedS1(cc, y) @l ==> x = y)
+            )
+        )
+"
+
+
+lemma S6_correctness_any_NEW:
+// if for all traces the honest verifiers verify S6
+" All cc y #k. CCVerifiedS6(cc,'S6', y)@k
+        ==>
+        (
+            (
+                // then the SCS must have generated and signed the same S6 before that
+                Ex scs S6 s6 hash HP #i.
+                SCSAlg6(scs, s6, S6, hash, HP) @ i
+                & #i < #k
+            )
+        )
+"
+
+lemma Vcard_correctness: 
+" All pc s1 s2 s3 s4 s5 s6 sx c1c3 c2 c1c3_2 c2_2
+    #a.
+    // if the PC successfully verifies the VCard
+    PCVcard(pc, s1, s2, s3, s4, s5, s6, sx, c1c3, c2, c1c3_2, c2_2) @ a
+        ==>
+        (
+            (
+                // then the SCS and honest CCR must have generated the same values as contained in the VCard before
+                Ex scs cc S1 PP pp C1C3 C2 S4 S3 S2 SX S5 S6 hp S7
+                #i #j #l #m #n.
+                SCSGeneratePayloads(scs, S1, PP, s1, pp) @ i
+                & CCVerifyPPandS1AndGenerateC1C2(cc, S1, PP, s1, pp, c1c3, c2, C1C3, C2) @ j
+                & SCSAlg3(scs, s4, s3, s2, sx, S4, S3, S2, SX) @ l
+                & SCSAlg4(scs, s5, S5) @m
+                & SCSAlg6(scs, s6, S6, hp, S7) @n
+                & #i < #a
+                & #j < #a
+                & #l < #a
+                & #m < #a
+                & #n < #a
+            )
+        )
+"
+
+
+lemma PP_correctness_CC:
+// if for all traces the honest CCRs verify the PP payload
+" All cc pp #j. CCVerifiedPP(cc, pp) @j
+        ==>
+        ( 
+            ( // then the SCS must have generated and signed the same PP before that
+                Ex scs S1 PP s1  #i.
+                SCSGeneratePayloads(scs, S1, PP, s1, pp) @ i
+                & #i < #j
+                // & (All cc2 y #k. CCVerifiedPP(cc2, y) @k & #k < #j ==> x = y)
+            )
+        )
+"
+
+lemma c1c3_correctness_any_NEW:
+// if for all traces the verifiers successfully verify C1C3
+" All scs x #j. SCSVerifiedC1(scs,'C1C3', x) @j
+        ==>
+        ( 
+            (
+                // then the CCR must have generated and signed the same C1C3 before that
+                All cc pp PP s1 S1 c1c3 c2 C1 C2 #i.
+                CCVerifyPPandS1AndGenerateC1C2(cc, S1, PP, s1, pp, c1c3, c2, C1, C2) @ i
+                & #i < #j
+                ==> x = c1c3
+            )
+        )
+"
+
+
+lemma c2_correctness_any_NEW:
+// if for all traces the verifiers successfully verify C2
+" All scs x #j. SCSVerifiedC2(scs,'C2', x) @j
+        ==>
+        ( 
+            (
+                // then the CCR must have generated and signed the same C2 before that
+                All cc pp PP s1 S1 c1 c2 C1 C2  #i.
+                CCVerifyPPandS1AndGenerateC1C2(cc, S1, PP, s1, pp, c1, c2, C1, C2) @ i
+                & #i < #j
+                ==> x = c2
+            )
+            
+        )
+"
+
+lemma S3_correctness_NEW:
+// if for all traces the honest CCRs successfully verify S3
+" All cc s3_1 
+    #j.
+    CCVerifiesS3(cc, s3_1) @ j
+        ==>
+        (
+            // then the SCS must have generated and signed the same S3 before
+            Ex scs s4 s3 s2 sx S4 S3 S2 SX #i.
+            SCSAlg3(scs, s4, s3, s2, sx, S4, S3, S2, SX) @ i
+            & #i < #j
+                & s3 = s3_1
+        )
+"
+end
