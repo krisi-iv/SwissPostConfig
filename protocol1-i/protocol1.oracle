@@ -1,0 +1,130 @@
+#!/usr/bin/python3
+
+import re
+import os
+import sys
+debug = True
+
+lines = sys.stdin.readlines()
+l1 = []
+l2 = []
+l3 = []
+l4 = []
+l5 = []
+l6 = []
+lemma = sys.argv[1]
+
+# INPUT:
+# - lines contain a list of "%i:goal" where "%i" is the index of the goal
+# - lemma contain the name of the lemma under scrutiny
+# OUTPUT:
+# - (on stdout) a list of ordered index separated by EOL
+
+
+for line in lines:
+	num = line.split(':')[0]
+	if "attacker_changes_EB2_password_and_key_is_recovered_shares" in lemma:
+		print ("applying oracle to "+lemma)
+		if '!SCT_data_for_password_verification' in line or 'Keystore_' in line:
+			l1.append(num)
+		elif 'LeakPass(' in line or 'Out_EB_SCT(' in line:
+			l2.append(num)
+		elif '!KU( SchnorrProof(' in line or '!KU( pk(~' in line:
+			l3.append(num)
+		elif '!KU( sign(' in line:
+			l4.append(num)
+		elif '!KU( GenExpProof(' in line:
+			l5.append(num)
+		elif '!KU( ~' in line:
+			l6.append(num)
+	elif lemma == "attacker_changes_EB2_password":
+		print ("applying oracle to "+lemma)
+		if 'Out_EB' in line or 'Keystore_' in line or '!KU( ~' in line:
+			l1.append(num)
+		elif '!KU( GenExpProof(' in line or 'Out_CC' in line:
+			l2.append(num)
+		elif '!KU( pow(' in line:
+			l2.append(num)
+		elif '!KU( pk(' in line:
+			l5.append(num)
+		elif '!KU( sign(' in line:
+			l6.append(num)
+		elif '!KU( SchnorrProof(' in line:
+			l3.append(num)
+	elif "S1_correctness_CC" in lemma or "S3_correctness" in lemma:
+		print ("applying oracle to "+lemma)
+		if 'Keystore_' in line or '!KU( ~ltk' in line:
+			l1.append(num)
+		elif '!KU( sign(<pp_' in line or '!KU( sign(<x, h' in line:
+			l2.append(num)
+		elif '!Ltk_' in line or 'State_' in line:
+			l3.append(num)
+	elif "S6_correctness" in lemma:
+		if '!KU( ~csk2' in line or '!KU( ~elsk2' in line or '!KU( ~exp2' in line:
+			l6.append(num)
+		elif 'State_' in line or '!KU( ~' in line or 'Out_' in line:
+			l1.append(num)
+		elif '!KU( sign(<pp_' in line or 'Keystore_' in line:
+			l2.append(num)
+		elif '!KU( sign(<' in line:
+			l3.append(num)
+		elif '!KU( ~' in line or '!KU( pow(' in line or '!KU( sign(<' in line or '!KU( pk(' in line:
+			l4.append(num)
+		elif '!KU( SchnorrProof(' in line or '!KU( GenExpProof(' in line:
+			l5.append(num)
+		elif '!KU( h(' in line:
+			l6.append(num)
+	elif lemma == "S1_correctness_Verif":
+		print ("applying oracle to "+lemma)
+		if 'Out_' in line or 'Keystore_' in line or '!KU( ~pp' in line:
+			l1.append(num)
+		elif 'CCVerified' in line or '!KU( sign(<pp_' in line or '!Ltk_' in line or 'State_' in line: 
+			l2.append(num)
+		elif '!KU( ~' in line or '!KU( pow(' in line or '!KU( sign(<' in line:
+			l3.append(num)
+	elif "PP_correctness" in lemma :
+		print ("applying oracle to "+lemma)
+		if 'State_' in line or 'Out_' in line or '!KU( ~pp' in line or '!KU( ~s1' in line or '!KU( ~s3' in line or '!KU( ~EL' in line or '!KU( ~s2' in line or '!KU( ~s4' in line or '!KU( ~s5' in line or 'Keystore_' in line or '!KU( ~ltk' in line:
+			l1.append(num)
+		elif '!KU( sign(<pp_' in line:
+			l2.append(num)
+		elif '!KU( sign(<' in line:
+			l3.append(num)
+		elif '!KU( h(' in line or '!KU( pow(' in line or '!KU( sign(<' in line or '!KU( pk(' in line or '∃ ' in line:
+			l4.append(num)
+		elif '!KU( SchnorrProof(' in line or '!KU( GenExpProof(' in line:
+			l5.append(num)
+	elif "executability" in lemma or "but_fails_check" in lemma:
+		print ("applying oracle to "+lemma)
+		if 'State_' in line or 'Out_' in line or '!KU( ~pp' in line or '!KU( ~s1' in line or '!KU( ~s3' in line or '!KU( ~EL' in line or '!KU( ~s2' in line or '!KU( ~s4' in line or '!KU( ~s5' in line or 'Keystore_' in line or '!KU( ~ltk' in line or '!Ltk_' in line or '!KU( ~pi' in line  or '!KU( ~kid' in line:
+			l1.append(num)
+		elif '!KU( sign(<pp_' in line or '!KU( sign(<' in line  or '!KU( pow(' in line or '!KU( h1(pow(' in line:
+			l2.append(num)
+		elif '!KU( ~csk' in line or '!KU( ~elsk' in line or '!KU( ~exp' in line:
+			l3.append(num)
+		elif '!KU( h(' in line or '!KU( pk(h(' in line or '!KU( sign(<' in line or '!KU( pk(~csk' in line or '!KU( pk(~elsk' in line or '!KU( pk(~exp' in line or '∃ ' in line:
+			l4.append(num)
+		elif '!KU( SchnorrProof(' in line or '!KU( GenExpProof(' in line:
+			l5.append(num)
+	elif "SX_correctness" in lemma or "S5_correctness" in lemma or "c1" in lemma or "c2" in lemma or "Vcard" in lemma:
+		print ("applying oracle to "+lemma)
+		if 'State_' in line or '!KU( ~' in line or 'Out_' in line:
+			l1.append(num)
+		elif '!KU( sign(<pp_' in line or 'Keystore_' in line:
+			l2.append(num)
+		elif '!KU( sign(<' in line:
+			l3.append(num)
+		elif '!KU( ~' in line or '!KU( pow(' in line or '!KU( sign(<' in line or '!KU( pk(' in line:
+			l4.append(num)
+		elif '!KU( SchnorrProof(' in line or '!KU( GenExpProof(' in line:
+			l5.append(num)
+		elif '!KU( h(' in line:
+			l6.append(num)
+	else:
+		print ("applying standard heuristic to "+lemma)
+		exit(0)		
+
+# Ordering all goals by ranking (higher first)
+ranked=l1+l2+l3+l4+l5+l6
+for goal in ranked:
+	print (goal)
